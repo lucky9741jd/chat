@@ -70,6 +70,19 @@ input {
   overflow-wrap: anywhere;
 }
 
+.logout-button {
+  width: 100%;
+  min-height: 36px;
+  margin-top: 12px;
+  padding: 0 12px;
+  background: var(--side-soft);
+  color: var(--side-text);
+}
+
+.logout-button:hover {
+  background: #2b3b49;
+}
+
 .panel-section {
   min-height: 0;
   display: grid;

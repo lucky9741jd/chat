@@ -30,6 +30,7 @@ Local JSON files under data/
 - `GET /health`: service status and counts.
 - `POST /api/register`: creates a local account and session.
 - `POST /api/login`: validates credentials and creates a session.
+- `POST /api/logout`: revokes the current session token.
 - `GET /api/session`: validates a session token and returns app bootstrap data.
 
 ## WebSocket
@@ -72,13 +73,17 @@ Message records include a `context`:
 
 ## Retention
 
-`server.js` keeps messages for seven days:
+`server.js` keeps messages for `RETENTION_DAYS`, defaulting to seven days:
 
 ```text
-RETENTION_MS = 7 * 24 * 60 * 60 * 1000
+RETENTION_DAYS = 7
 ```
 
 Cleanup runs on startup and then once per hour.
+
+## Configuration
+
+See [Deployment](DEPLOYMENT.md) for supported environment variables, systemd setup, HTTPS proxying, and backups.
 
 ## Security Notes
 

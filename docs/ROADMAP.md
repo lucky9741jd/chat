@@ -1,5 +1,19 @@
 # Improvement Roadmap
 
+## Recently Completed
+
+1. Configurable runtime settings
+
+   `HOST`, `PORT`, `DATA_DIR`, `RETENTION_DAYS`, `SESSION_DAYS`, and message size limits can now be set with environment variables.
+
+2. Logout
+
+   Users can revoke the current session from the browser.
+
+3. Deployment documentation
+
+   Added environment variable, systemd, Nginx HTTPS, and backup guidance.
+
 ## Near-Term
 
 1. Add HTTPS
@@ -10,9 +24,9 @@
 
    Use `systemd` or a process manager so the server restarts automatically after crashes or machine reboot.
 
-3. Add logout and password change
+3. Add password change
 
-   Users should be able to revoke their current session and rotate credentials.
+   Users can now log out. The next step is allowing them to rotate credentials.
 
 4. Improve mobile recording
 
@@ -90,18 +104,10 @@
 
 ## Deployment
 
-1. Add production configuration
-
-   Use environment variables for port, host, retention days, session lifetime, and data path.
-
-2. Add reverse proxy config
-
-   Provide Nginx examples for HTTPS and WebSocket proxying.
-
-3. Add Docker support
+1. Add Docker support
 
    Package the app with a persistent volume for `data/`.
 
-4. Add monitoring
+2. Add monitoring
 
    Expose operational metrics such as online users, message rate, error count, and storage size.

@@ -7,15 +7,18 @@ const WebSocket = require("ws");
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || "0.0.0.0";
 const PUBLIC_DIR = path.join(__dirname, "public");
-const DATA_DIR = path.join(__dirname, "data");
+const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, "data"));
 const USERS_FILE = path.join(DATA_DIR, "users.json");
 const ROOMS_FILE = path.join(DATA_DIR, "rooms.json");
 const MESSAGES_FILE = path.join(DATA_DIR, "messages.json");
 const SESSIONS_FILE = path.join(DATA_DIR, "sessions.json");
-const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
-const MAX_TEXT_LENGTH = 2000;
-const MAX_VOICE_DATA_LENGTH = 2_000_000;
+const RETENTION_DAYS = Math.max(1, Number(process.env.RETENTION_DAYS || 7));
+const SESSION_DAYS = Math.max(1, Number(process.env.SESSION_DAYS || 30));
+const RETENTION_MS = RETENTION_DAYS * 24 * 60 * 60 * 1000;
+const SESSION_MS = SESSION_DAYS * 24 * 60 * 60 * 1000;
+const MAX_TEXT_LENGTH = Math.max(1, Number(process.env.MAX_TEXT_LENGTH || 2000));
+const MAX_VOICE_DATA_LENGTH = Math.max(1000, Number(process.env.MAX_VOICE_DATA_LENGTH || 2_000_000));
+const MAX_VOICE_SECONDS = Math.max(1, Number(process.env.MAX_VOICE_SECONDS || 600));
 
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
@@ -174,6 +177,7 @@ function broadcastMessage(message) {
 function send(res, status, payload) {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
+    "X-Content-Type-Options": "nosniff",
     "Cache-Control": "no-store"
   });
   res.end(JSON.stringify(payload));
@@ -248,6 +252,14 @@ async function handleApi(req, res, url) {
       });
     }
 
+    if (req.method === "POST" && url.pathname === "/api/logout") {
+      const auth = req.headers.authorization || "";
+      const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+      sessions = sessions.filter((session) => session.token !== token);
+      writeJson(SESSIONS_FILE, sessions);
+      return send(res, 200, { ok: true });
+    }
+
     return send(res, 404, { error: "Not found" });
   } catch (error) {
     return send(res, 400, { error: error.message });
@@ -268,7 +280,11 @@ const server = http.createServer((req, res) => {
       users: users.length,
       rooms: rooms.length,
       messages: messages.length,
-      retentionDays: 7
+      retentionDays: RETENTION_DAYS,
+      sessionDays: SESSION_DAYS,
+      maxTextLength: MAX_TEXT_LENGTH,
+      maxVoiceSeconds: MAX_VOICE_SECONDS,
+      dataDir: DATA_DIR
     });
     return;
   }
@@ -369,7 +385,7 @@ wss.on("connection", (ws, req) => {
         ? {
             dataUrl: payload.voice.dataUrl.slice(0, MAX_VOICE_DATA_LENGTH),
             mimeType: safeText(payload.voice.mimeType, 80) || "audio/webm",
-            seconds: Math.max(1, Math.min(600, Number(payload.voice.seconds || 1)))
+            seconds: Math.max(1, Math.min(MAX_VOICE_SECONDS, Number(payload.voice.seconds || 1)))
           }
         : null;
       if (!text && !voice) return;

@@ -46,6 +46,12 @@ http://<server-ip>:3000
 
 Use `PORT=8080 npm start` to change the port.
 
+Common configuration:
+
+```bash
+PORT=3000 HOST=0.0.0.0 RETENTION_DAYS=7 SESSION_DAYS=30 DATA_DIR=./data npm start
+```
+
 Health check:
 
 ```text
@@ -61,7 +67,7 @@ The server stores local data under `data/`:
 - `rooms.json`
 - `messages.json`
 
-Messages older than seven days are removed automatically.
+Messages older than `RETENTION_DAYS` are removed automatically. The default is seven days.
 
 ## Current Limitations
 

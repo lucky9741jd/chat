@@ -21,6 +21,7 @@ const roomNameInput = document.querySelector("#roomNameInput");
 const newRoomButton = document.querySelector("#newRoomButton");
 const cancelRoomButton = document.querySelector("#cancelRoomButton");
 const recordButton = document.querySelector("#recordButton");
+const logoutButton = document.querySelector("#logoutButton");
 const menuButton = document.querySelector("#menuButton");
 const sidebar = document.querySelector("#sidebar");
 
@@ -119,6 +120,26 @@ function send(payload) {
   if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload));
 }
 
+function resetClientState() {
+  if (socket) socket.close();
+  localStorage.removeItem(tokenKey);
+  token = "";
+  socket = null;
+  currentUser = null;
+  rooms = [];
+  users = [];
+  online = [];
+  currentContext = { type: "room", roomId: "general" };
+  messagesEl.textContent = "";
+  roomListEl.textContent = "";
+  userListEl.textContent = "";
+  accountNameEl.textContent = "Signed out";
+  onlineEl.textContent = "0";
+  conversationTitleEl.textContent = "General";
+  statusEl.textContent = "Signed out";
+  setComposerEnabled(false);
+}
+
 function renderRooms() {
   roomListEl.textContent = "";
   rooms.forEach((room) => {
@@ -211,6 +232,7 @@ function connect() {
 
   socket.addEventListener("close", () => {
     setComposerEnabled(false);
+    if (!token) return;
     statusEl.textContent = "Disconnected. Reconnecting...";
     window.setTimeout(connect, 1500);
   });
@@ -265,6 +287,16 @@ async function authenticate(mode) {
   }
 }
 
+async function logout() {
+  try {
+    if (token) await api("/api/logout", { method: "POST", body: "{}" });
+  } catch {
+    // Local logout should still work if the server is unavailable.
+  }
+  resetClientState();
+  authDialog.showModal();
+}
+
 async function startRecording() {
   if (!navigator.mediaDevices || !window.MediaRecorder) return;
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -317,6 +349,7 @@ roomForm.addEventListener("submit", (event) => {
 
 newRoomButton.addEventListener("click", () => roomDialog.showModal());
 cancelRoomButton.addEventListener("click", () => roomDialog.close());
+logoutButton.addEventListener("click", logout);
 menuButton.addEventListener("click", () => sidebar.classList.toggle("open"));
 
 composer.addEventListener("submit", (event) => {

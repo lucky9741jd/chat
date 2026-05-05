@@ -24,6 +24,8 @@ New users can register with:
 
 After login, the browser stores a local session token. If the session expires or is removed, the login dialog appears again.
 
+Use `Logout` in the sidebar to revoke the current browser session.
+
 ## Group Chats
 
 The default group is `General`.
@@ -50,7 +52,7 @@ Mobile browsers commonly require HTTPS before allowing microphone access. If rec
 
 ## Message Retention
 
-Messages are retained for seven days. The server automatically removes older records.
+Messages are retained for seven days by default. The server operator can change this with `RETENTION_DAYS`.
 
 ## Health Check
 
