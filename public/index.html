@@ -7,33 +7,71 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <main class="shell">
+    <main class="app">
+      <aside class="sidebar" id="sidebar">
+        <div class="brand">
+          <h1>Chat</h1>
+          <p id="accountName">Signed out</p>
+        </div>
+
+        <section class="panel-section">
+          <div class="section-title">
+            <span>Groups</span>
+            <button type="button" class="icon-button" id="newRoomButton" title="New group">+</button>
+          </div>
+          <div class="nav-list" id="roomList"></div>
+        </section>
+
+        <section class="panel-section users-section">
+          <div class="section-title">
+            <span>People</span>
+            <span class="online-pill"><span class="dot"></span><span id="onlineCount">0</span></span>
+          </div>
+          <div class="nav-list" id="userList"></div>
+        </section>
+      </aside>
+
       <section class="chat">
         <header class="topbar">
+          <button type="button" class="menu-button" id="menuButton">☰</button>
           <div>
-            <h1>Chat</h1>
+            <h2 id="conversationTitle">General</h2>
             <p id="status">Connecting...</p>
-          </div>
-          <div class="online" aria-label="Online users">
-            <span class="dot"></span>
-            <span id="onlineCount">0</span>
           </div>
         </header>
 
         <div id="messages" class="messages" aria-live="polite"></div>
 
         <form id="composer" class="composer">
-          <input id="messageInput" type="text" autocomplete="off" placeholder="Message" maxlength="1000" />
+          <button type="button" id="recordButton" class="secondary-button">Hold Voice</button>
+          <input id="messageInput" type="text" autocomplete="off" placeholder="Message" maxlength="2000" />
           <button type="submit">Send</button>
         </form>
       </section>
     </main>
 
-    <dialog id="nameDialog">
-      <form method="dialog" id="nameForm" class="name-form">
-        <h2>Enter a display name</h2>
-        <input id="nameInput" type="text" autocomplete="name" maxlength="32" placeholder="Your name" autofocus />
-        <button type="submit">Join</button>
+    <dialog id="authDialog">
+      <form method="dialog" id="authForm" class="auth-form">
+        <h2>Sign in</h2>
+        <input id="usernameInput" type="text" autocomplete="username" maxlength="32" placeholder="Username" autofocus />
+        <input id="displayNameInput" type="text" autocomplete="name" maxlength="32" placeholder="Display name for new account" />
+        <input id="passwordInput" type="password" autocomplete="current-password" placeholder="Password" />
+        <p id="authError" class="error"></p>
+        <div class="auth-actions">
+          <button type="submit" id="loginButton">Login</button>
+          <button type="button" class="secondary-button" id="registerButton">Register</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="roomDialog">
+      <form method="dialog" id="roomForm" class="auth-form">
+        <h2>New group</h2>
+        <input id="roomNameInput" type="text" maxlength="40" placeholder="Group name" />
+        <div class="auth-actions">
+          <button type="submit">Create</button>
+          <button type="button" class="secondary-button" id="cancelRoomButton">Cancel</button>
+        </div>
       </form>
     </dialog>
 
