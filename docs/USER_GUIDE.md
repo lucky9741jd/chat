@@ -36,13 +36,19 @@ To create another group:
 2. Enter a group name.
 3. Send messages in the new group.
 
-Messages are separated by group, so each room has its own history.
+Messages are separated by group, so each room has its own history. Users only see groups where they are members.
+
+To invite someone into the current group:
+
+1. Add them as a friend first.
+2. Open the group.
+3. Enter their username in `Invite friend`.
 
 ## Private Chats
 
-The People list shows registered users except the current user.
+The People list shows friends, not every registered user.
 
-Click a user to open a private one-to-one chat. Private messages are only delivered to the two participants.
+To add a friend, enter a username in `Add username`. Click a friend to open a private one-to-one chat. Private messages are only delivered to the two participants.
 
 ## Voice Messages
 

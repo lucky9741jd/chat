@@ -11,16 +11,19 @@ This project is a self-hosted web chat application. The backend runs on the curr
 - Browser client for desktop and mobile
 - Local account registration and login
 - Multiple group chats
+- Group membership and group invites
+- Friend system for one-to-one private chats
 - Private one-to-one chats
 - Text and voice messages
 - Online user presence
 - Seven-day message retention
-- Local JSON persistence in `data/`
+- SQLite persistence in `data/chat.sqlite`
 
 ## Documentation
 
 - [User Guide](docs/USER_GUIDE.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [Deployment](docs/DEPLOYMENT.md)
 - [Improvement Roadmap](docs/ROADMAP.md)
 
 ## Run
@@ -60,17 +63,16 @@ http://<server-ip>:3000/health
 
 ## Data
 
-The server stores local data under `data/`:
+The server stores local data in SQLite:
 
-- `users.json`
-- `sessions.json`
-- `rooms.json`
-- `messages.json`
+- `data/chat.sqlite`
+- `data/chat.sqlite-wal`
+- `data/chat.sqlite-shm`
 
 Messages older than `RETENTION_DAYS` are removed automatically. The default is seven days.
 
 ## Current Limitations
 
 - Voice recording may require HTTPS on mobile browsers.
-- JSON files are suitable for a small private deployment, not heavy production traffic.
+- SQLite is suitable for a small private deployment, but larger deployments should add backups, monitoring, and migration tooling.
 - There is no admin UI yet for user, room, or moderation management.

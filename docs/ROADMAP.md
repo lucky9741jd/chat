@@ -2,15 +2,23 @@
 
 ## Recently Completed
 
-1. Configurable runtime settings
+1. SQLite persistence
+
+   Runtime data now uses `data/chat.sqlite` instead of multiple JSON files.
+
+2. Friends and group membership
+
+   Private chats require friendship, group visibility is membership-based, and friends can be invited to groups.
+
+3. Configurable runtime settings
 
    `HOST`, `PORT`, `DATA_DIR`, `RETENTION_DAYS`, `SESSION_DAYS`, and message size limits can now be set with environment variables.
 
-2. Logout
+4. Logout
 
    Users can revoke the current session from the browser.
 
-3. Deployment documentation
+5. Deployment documentation
 
    Added environment variable, systemd, Nginx HTTPS, and backup guidance.
 
@@ -36,21 +44,21 @@
 
    Show unread counts for groups and private chats when messages arrive outside the active conversation.
 
+6. Add friend requests
+
+   The current implementation creates mutual friendships directly by username. A request/accept workflow should replace that for wider use.
+
 ## Reliability
 
-1. Move from JSON files to SQLite
-
-   JSON is simple and works for small deployments, but SQLite will handle concurrent writes, indexes, and safer persistence better.
-
-2. Add automated tests
+1. Add automated tests
 
    Cover auth, session validation, room creation, private message visibility, retention cleanup, and WebSocket delivery.
 
-3. Add structured logs
+2. Add structured logs
 
    Log startup, auth events, WebSocket connection counts, persistence errors, and unexpected exceptions.
 
-4. Add backups
+3. Add backups
 
    Periodically back up user, room, and message data.
 

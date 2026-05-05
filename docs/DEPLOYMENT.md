@@ -8,7 +8,7 @@ The server can be configured without code changes:
 | --- | --- | --- |
 | `HOST` | `0.0.0.0` | Listen address |
 | `PORT` | `3000` | Listen port |
-| `DATA_DIR` | `./data` | Runtime JSON data directory |
+| `DATA_DIR` | `./data` | Runtime SQLite data directory |
 | `RETENTION_DAYS` | `7` | Message retention window |
 | `SESSION_DAYS` | `30` | Login session lifetime |
 | `MAX_TEXT_LENGTH` | `2000` | Maximum text message length |
@@ -92,7 +92,7 @@ server {
 
 ## Backup
 
-Back up the configured `DATA_DIR`. For the default deployment:
+Back up the configured `DATA_DIR`. It contains `chat.sqlite` and SQLite WAL files. For the default deployment:
 
 ```bash
 tar -czf chat-data-$(date +%F).tar.gz /home/hejindong/code/chat/data

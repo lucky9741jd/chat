@@ -2,16 +2,14 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { DatabaseSync } = require("node:sqlite");
 const WebSocket = require("ws");
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || "0.0.0.0";
 const PUBLIC_DIR = path.join(__dirname, "public");
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, "data"));
-const USERS_FILE = path.join(DATA_DIR, "users.json");
-const ROOMS_FILE = path.join(DATA_DIR, "rooms.json");
-const MESSAGES_FILE = path.join(DATA_DIR, "messages.json");
-const SESSIONS_FILE = path.join(DATA_DIR, "sessions.json");
+const DB_FILE = path.join(DATA_DIR, "chat.sqlite");
 const RETENTION_DAYS = Math.max(1, Number(process.env.RETENTION_DAYS || 7));
 const SESSION_DAYS = Math.max(1, Number(process.env.SESSION_DAYS || 30));
 const RETENTION_MS = RETENTION_DAYS * 24 * 60 * 60 * 1000;
@@ -29,18 +27,61 @@ const contentTypes = {
 };
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
-
-function readJson(file, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJson(file, value) {
-  fs.writeFileSync(file, JSON.stringify(value, null, 2));
-}
+const db = new DatabaseSync(DB_FILE);
+db.exec("PRAGMA foreign_keys = ON");
+db.exec("PRAGMA journal_mode = WAL");
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    salt TEXT NOT NULL,
+    hash TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS friendships (
+    user_a TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_b TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (user_a, user_b),
+    CHECK (user_a < user_b)
+  );
+  CREATE TABLE IF NOT EXISTS groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    owner_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS group_members (
+    group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL DEFAULT 'member',
+    joined_at TEXT NOT NULL,
+    PRIMARY KEY (group_id, user_id)
+  );
+  CREATE TABLE IF NOT EXISTS messages (
+    id TEXT PRIMARY KEY,
+    sender_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    sender_name TEXT NOT NULL,
+    context_type TEXT NOT NULL,
+    group_id TEXT REFERENCES groups(id) ON DELETE CASCADE,
+    dm_key TEXT,
+    participants_json TEXT,
+    text TEXT,
+    voice_json TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+  CREATE INDEX IF NOT EXISTS idx_members_user ON group_members(user_id);
+  CREATE INDEX IF NOT EXISTS idx_messages_group ON messages(context_type, group_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_messages_dm ON messages(context_type, dm_key, created_at);
+`);
 
 function safeText(value, maxLength) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, maxLength);
@@ -54,6 +95,10 @@ function slug(value) {
     .slice(0, 48);
 }
 
+function now() {
+  return new Date().toISOString();
+}
+
 function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   const hash = crypto.pbkdf2Sync(String(password), salt, 120000, 32, "sha256").toString("hex");
   return { salt, hash };
@@ -64,84 +109,174 @@ function verifyPassword(password, user) {
   return crypto.timingSafeEqual(Buffer.from(candidate.hash, "hex"), Buffer.from(user.hash, "hex"));
 }
 
-let users = readJson(USERS_FILE, []);
-let rooms = readJson(ROOMS_FILE, [
-  { id: "general", name: "General", createdAt: new Date().toISOString() }
-]);
-let messages = readJson(MESSAGES_FILE, []);
-let sessions = readJson(SESSIONS_FILE, []);
-
-function normalizeMessage(message) {
-  if (message.context) return message;
-  return {
-    id: message.id || crypto.randomUUID(),
-    senderId: message.senderId || message.userId || "legacy",
-    senderName: message.senderName || message.name || "Guest",
-    context: { type: "room", roomId: "general" },
-    text: safeText(message.text, MAX_TEXT_LENGTH),
-    voice: null,
-    at: message.at || new Date().toISOString()
-  };
-}
-
-function pruneData() {
-  const cutoff = Date.now() - RETENTION_MS;
-  messages = messages
-    .map(normalizeMessage)
-    .filter((message) => message.context && new Date(message.at).getTime() >= cutoff);
-  sessions = sessions.filter((session) => new Date(session.expiresAt).getTime() > Date.now());
-  writeJson(MESSAGES_FILE, messages);
-  writeJson(SESSIONS_FILE, sessions);
-}
-
 function publicUser(user) {
   return {
     id: user.id,
     username: user.username,
-    displayName: user.displayName,
-    createdAt: user.createdAt
+    displayName: user.displayName || user.display_name,
+    createdAt: user.createdAt || user.created_at
   };
 }
 
-function findSession(token) {
-  if (!token) return null;
-  const session = sessions.find((item) => item.token === token);
-  if (!session || new Date(session.expiresAt).getTime() <= Date.now()) return null;
-  const user = users.find((item) => item.id === session.userId);
-  return user ? { session, user } : null;
-}
-
-function createSession(userId) {
-  const token = crypto.randomBytes(32).toString("hex");
-  const session = {
-    token,
-    userId,
-    createdAt: new Date().toISOString(),
-    expiresAt: new Date(Date.now() + SESSION_MS).toISOString()
+function rowUser(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    username: row.username,
+    displayName: row.display_name,
+    salt: row.salt,
+    hash: row.hash,
+    createdAt: row.created_at
   };
-  sessions.push(session);
-  writeJson(SESSIONS_FILE, sessions);
-  return session;
 }
 
-function roomExists(roomId) {
-  return rooms.some((room) => room.id === roomId);
+function rowGroup(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    ownerId: row.owner_id,
+    createdAt: row.created_at
+  };
 }
 
 function dmKey(a, b) {
   return [a, b].sort().join(":");
 }
 
-function getHistory(context) {
-  return messages.filter((message) => {
-    if (context.type === "room") return message.context.type === "room" && message.context.roomId === context.roomId;
-    return message.context.type === "dm" && message.context.key === dmKey(context.withUserId, context.selfUserId);
-  });
+function friendshipPair(a, b) {
+  return a < b ? [a, b] : [b, a];
+}
+
+function areFriends(a, b) {
+  const [userA, userB] = friendshipPair(a, b);
+  return Boolean(db.prepare("SELECT 1 FROM friendships WHERE user_a = ? AND user_b = ?").get(userA, userB));
+}
+
+function addFriendship(a, b) {
+  if (a === b) return false;
+  const [userA, userB] = friendshipPair(a, b);
+  db.prepare("INSERT OR IGNORE INTO friendships (user_a, user_b, created_at) VALUES (?, ?, ?)").run(userA, userB, now());
+  return true;
+}
+
+function getUserByUsername(username) {
+  return rowUser(db.prepare("SELECT * FROM users WHERE username = ?").get(username));
+}
+
+function getUserById(id) {
+  return rowUser(db.prepare("SELECT * FROM users WHERE id = ?").get(id));
+}
+
+function getSessionUser(token) {
+  if (!token) return null;
+  const row = db.prepare(`
+    SELECT users.*
+    FROM sessions
+    JOIN users ON users.id = sessions.user_id
+    WHERE sessions.token = ? AND sessions.expires_at > ?
+  `).get(token, now());
+  return rowUser(row);
+}
+
+function createSession(userId) {
+  const token = crypto.randomBytes(32).toString("hex");
+  db.prepare("INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)")
+    .run(token, userId, now(), new Date(Date.now() + SESSION_MS).toISOString());
+  return token;
+}
+
+function ensureGeneralGroup(userId) {
+  const existing = db.prepare("SELECT * FROM groups WHERE id = 'general'").get();
+  if (!existing) {
+    db.prepare("INSERT INTO groups (id, name, owner_id, created_at) VALUES ('general', 'General', ?, ?)").run(userId, now());
+  }
+  db.prepare("INSERT OR IGNORE INTO group_members (group_id, user_id, role, joined_at) VALUES ('general', ?, 'member', ?)")
+    .run(userId, now());
+}
+
+function ensureDefaultGroup() {
+  const existing = db.prepare("SELECT 1 FROM groups WHERE id = 'general'").get();
+  if (!existing) {
+    db.prepare("INSERT INTO groups (id, name, owner_id, created_at) VALUES ('general', 'General', NULL, ?)").run(now());
+  }
+}
+
+function isGroupMember(groupId, userId) {
+  return Boolean(db.prepare("SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?").get(groupId, userId));
+}
+
+function getVisibleGroups(userId) {
+  return db.prepare(`
+    SELECT groups.*
+    FROM groups
+    JOIN group_members ON group_members.group_id = groups.id
+    WHERE group_members.user_id = ?
+    ORDER BY groups.created_at ASC
+  `).all(userId).map(rowGroup);
+}
+
+function getFriends(userId) {
+  return db.prepare(`
+    SELECT users.*
+    FROM friendships
+    JOIN users ON users.id = CASE WHEN friendships.user_a = ? THEN friendships.user_b ELSE friendships.user_a END
+    WHERE friendships.user_a = ? OR friendships.user_b = ?
+    ORDER BY users.display_name COLLATE NOCASE ASC
+  `).all(userId, userId, userId).map(rowUser).map(publicUser);
+}
+
+function getBootstrap(user) {
+  return {
+    user: publicUser(user),
+    users: getFriends(user.id),
+    rooms: getVisibleGroups(user.id),
+    online: connectedUsers()
+  };
+}
+
+function rowMessage(row) {
+  const voice = row.voice_json ? JSON.parse(row.voice_json) : null;
+  const participants = row.participants_json ? JSON.parse(row.participants_json) : null;
+  const context = row.context_type === "room"
+    ? { type: "room", roomId: row.group_id }
+    : { type: "dm", key: row.dm_key, participants };
+  return {
+    id: row.id,
+    senderId: row.sender_id,
+    senderName: row.sender_name,
+    context,
+    text: row.text || "",
+    voice,
+    at: row.created_at
+  };
+}
+
+function getHistory(userId, context) {
+  if (context.type === "room") {
+    if (!isGroupMember(context.roomId, userId)) return [];
+    return db.prepare(`
+      SELECT * FROM messages
+      WHERE context_type = 'room' AND group_id = ?
+      ORDER BY created_at ASC
+    `).all(context.roomId).map(rowMessage);
+  }
+  if (!areFriends(userId, context.withUserId)) return [];
+  return db.prepare(`
+    SELECT * FROM messages
+    WHERE context_type = 'dm' AND dm_key = ?
+    ORDER BY created_at ASC
+  `).all(dmKey(userId, context.withUserId)).map(rowMessage);
 }
 
 function canSee(userId, message) {
-  if (message.context.type === "room") return true;
+  if (message.context.type === "room") return isGroupMember(message.context.roomId, userId);
   return message.context.participants.includes(userId);
+}
+
+function pruneData() {
+  const cutoff = new Date(Date.now() - RETENTION_MS).toISOString();
+  db.prepare("DELETE FROM messages WHERE created_at < ?").run(cutoff);
+  db.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(now());
 }
 
 function sendJson(ws, payload) {
@@ -150,13 +285,10 @@ function sendJson(ws, payload) {
 
 function connectedUsers() {
   const seen = new Set();
-  const online = [];
   for (const client of wss.clients) {
-    if (client.readyState !== WebSocket.OPEN || !client.user || seen.has(client.user.id)) continue;
-    seen.add(client.user.id);
-    online.push(client.user.id);
+    if (client.readyState === WebSocket.OPEN && client.user) seen.add(client.user.id);
   }
-  return online;
+  return [...seen];
 }
 
 function broadcastPresence() {
@@ -166,11 +298,20 @@ function broadcastPresence() {
   }
 }
 
+function broadcastBootstrap(userId) {
+  for (const client of wss.clients) {
+    if (client.user?.id === userId) sendJson(client, { type: "bootstrap", ...getBootstrap(client.user) });
+  }
+}
+
+function broadcastRooms(groupId) {
+  const memberRows = db.prepare("SELECT user_id FROM group_members WHERE group_id = ?").all(groupId);
+  for (const row of memberRows) broadcastBootstrap(row.user_id);
+}
+
 function broadcastMessage(message) {
   for (const client of wss.clients) {
-    if (client.user && canSee(client.user.id, message)) {
-      sendJson(client, { type: "message", message });
-    }
+    if (client.user && canSee(client.user.id, message)) sendJson(client, { type: "message", message });
   }
 }
 
@@ -213,7 +354,7 @@ async function handleApi(req, res, url) {
       const password = String(body.password || "");
       if (!/^[a-z0-9_]{3,32}$/.test(username)) return send(res, 400, { error: "Username must be 3-32 characters: a-z, 0-9, _." });
       if (password.length < 6) return send(res, 400, { error: "Password must be at least 6 characters." });
-      if (users.some((user) => user.username === username)) return send(res, 409, { error: "Username already exists." });
+      if (getUserByUsername(username)) return send(res, 409, { error: "Username already exists." });
 
       const passwordHash = hashPassword(password);
       const user = {
@@ -222,42 +363,66 @@ async function handleApi(req, res, url) {
         displayName: displayName || username,
         salt: passwordHash.salt,
         hash: passwordHash.hash,
-        createdAt: new Date().toISOString()
+        createdAt: now()
       };
-      users.push(user);
-      writeJson(USERS_FILE, users);
-      const session = createSession(user.id);
-      return send(res, 201, { token: session.token, user: publicUser(user), rooms, users: users.map(publicUser) });
+      db.prepare("INSERT INTO users (id, username, display_name, salt, hash, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(user.id, user.username, user.displayName, user.salt, user.hash, user.createdAt);
+      ensureGeneralGroup(user.id);
+      const token = createSession(user.id);
+      return send(res, 201, { token, ...getBootstrap(user) });
     }
 
     if (req.method === "POST" && url.pathname === "/api/login") {
       const body = await readBody(req);
-      const username = safeText(body.username, 32).toLowerCase();
-      const user = users.find((item) => item.username === username);
+      const user = getUserByUsername(safeText(body.username, 32).toLowerCase());
       if (!user || !verifyPassword(body.password || "", user)) return send(res, 401, { error: "Invalid username or password." });
-      const session = createSession(user.id);
-      return send(res, 200, { token: session.token, user: publicUser(user), rooms, users: users.map(publicUser) });
+      ensureGeneralGroup(user.id);
+      const token = createSession(user.id);
+      return send(res, 200, { token, ...getBootstrap(user) });
     }
 
     if (req.method === "GET" && url.pathname === "/api/session") {
-      const auth = req.headers.authorization || "";
-      const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-      const found = findSession(token);
-      if (!found) return send(res, 401, { error: "Session expired." });
-      return send(res, 200, {
-        user: publicUser(found.user),
-        users: users.map(publicUser),
-        rooms,
-        online: connectedUsers()
-      });
+      const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+      const user = getSessionUser(token);
+      if (!user) return send(res, 401, { error: "Session expired." });
+      ensureGeneralGroup(user.id);
+      return send(res, 200, getBootstrap(user));
     }
 
     if (req.method === "POST" && url.pathname === "/api/logout") {
-      const auth = req.headers.authorization || "";
-      const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-      sessions = sessions.filter((session) => session.token !== token);
-      writeJson(SESSIONS_FILE, sessions);
+      const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+      db.prepare("DELETE FROM sessions WHERE token = ?").run(token);
       return send(res, 200, { ok: true });
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/friends/add") {
+      const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+      const user = getSessionUser(token);
+      if (!user) return send(res, 401, { error: "Session expired." });
+      const body = await readBody(req);
+      const friend = getUserByUsername(safeText(body.username, 32).toLowerCase());
+      if (!friend) return send(res, 404, { error: "User not found." });
+      if (friend.id === user.id) return send(res, 400, { error: "You cannot add yourself." });
+      addFriendship(user.id, friend.id);
+      broadcastBootstrap(user.id);
+      broadcastBootstrap(friend.id);
+      return send(res, 200, getBootstrap(user));
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/groups/invite") {
+      const token = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+      const user = getSessionUser(token);
+      if (!user) return send(res, 401, { error: "Session expired." });
+      const body = await readBody(req);
+      const groupId = safeText(body.groupId, 80);
+      const friend = getUserByUsername(safeText(body.username, 32).toLowerCase());
+      if (!friend) return send(res, 404, { error: "User not found." });
+      if (!isGroupMember(groupId, user.id)) return send(res, 403, { error: "You are not in this group." });
+      if (!areFriends(user.id, friend.id)) return send(res, 403, { error: "Add this user as a friend before inviting them." });
+      db.prepare("INSERT OR IGNORE INTO group_members (group_id, user_id, role, joined_at) VALUES (?, ?, 'member', ?)")
+        .run(groupId, friend.id, now());
+      broadcastRooms(groupId);
+      return send(res, 200, getBootstrap(user));
     }
 
     return send(res, 404, { error: "Not found" });
@@ -277,14 +442,16 @@ const server = http.createServer((req, res) => {
     send(res, 200, {
       ok: true,
       online: connectedUsers().length,
-      users: users.length,
-      rooms: rooms.length,
-      messages: messages.length,
+      users: db.prepare("SELECT COUNT(*) AS count FROM users").get().count,
+      groups: db.prepare("SELECT COUNT(*) AS count FROM groups").get().count,
+      friendships: db.prepare("SELECT COUNT(*) AS count FROM friendships").get().count,
+      messages: db.prepare("SELECT COUNT(*) AS count FROM messages").get().count,
       retentionDays: RETENTION_DAYS,
       sessionDays: SESSION_DAYS,
       maxTextLength: MAX_TEXT_LENGTH,
       maxVoiceSeconds: MAX_VOICE_SECONDS,
-      dataDir: DATA_DIR
+      dataDir: DATA_DIR,
+      database: DB_FILE
     });
     return;
   }
@@ -315,20 +482,17 @@ const wss = new WebSocket.Server({ server, path: "/ws" });
 
 wss.on("connection", (ws, req) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
-  const found = findSession(url.searchParams.get("token"));
-  if (!found) {
+  const user = getSessionUser(url.searchParams.get("token"));
+  if (!user) {
     ws.close(1008, "Unauthorized");
     return;
   }
 
-  ws.user = found.user;
+  ws.user = user;
   sendJson(ws, {
     type: "ready",
-    user: publicUser(found.user),
-    users: users.map(publicUser),
-    rooms,
-    online: connectedUsers(),
-    history: getHistory({ type: "room", roomId: "general" })
+    ...getBootstrap(user),
+    history: getHistory(user.id, { type: "room", roomId: "general" })
   });
   broadcastPresence();
 
@@ -342,15 +506,12 @@ wss.on("connection", (ws, req) => {
 
     if (payload.type === "history") {
       if (payload.context?.type === "room") {
-        const roomId = safeText(payload.context.roomId, 64);
-        if (!roomExists(roomId)) return;
-        sendJson(ws, { type: "history", context: { type: "room", roomId }, messages: getHistory({ type: "room", roomId }) });
+        const roomId = safeText(payload.context.roomId, 80);
+        sendJson(ws, { type: "history", context: { type: "room", roomId }, messages: getHistory(ws.user.id, { type: "room", roomId }) });
       }
       if (payload.context?.type === "dm") {
         const withUserId = safeText(payload.context.withUserId, 80);
-        if (!users.some((user) => user.id === withUserId)) return;
-        const context = { type: "dm", selfUserId: ws.user.id, withUserId };
-        sendJson(ws, { type: "history", context: { type: "dm", withUserId }, messages: getHistory(context) });
+        sendJson(ws, { type: "history", context: { type: "dm", withUserId }, messages: getHistory(ws.user.id, { type: "dm", withUserId }) });
       }
       return;
     }
@@ -358,26 +519,30 @@ wss.on("connection", (ws, req) => {
     if (payload.type === "room:create") {
       const name = safeText(payload.name, 40);
       const id = slug(name) || crypto.randomUUID().slice(0, 8);
-      if (!name || roomExists(id)) return;
-      rooms.push({ id, name, createdAt: new Date().toISOString(), createdBy: ws.user.id });
-      writeJson(ROOMS_FILE, rooms);
-      for (const client of wss.clients) {
-        if (client.user) sendJson(client, { type: "rooms", rooms });
-      }
+      if (!name) return;
+      const groupId = db.prepare("SELECT 1 FROM groups WHERE id = ?").get(id) ? `${id}-${crypto.randomUUID().slice(0, 6)}` : id;
+      db.prepare("INSERT INTO groups (id, name, owner_id, created_at) VALUES (?, ?, ?, ?)").run(groupId, name, ws.user.id, now());
+      db.prepare("INSERT INTO group_members (group_id, user_id, role, joined_at) VALUES (?, ?, 'owner', ?)").run(groupId, ws.user.id, now());
+      broadcastBootstrap(ws.user.id);
       return;
     }
 
     if (payload.type === "message") {
-      let context;
+      let contextType;
+      let groupId = null;
+      let key = null;
+      let participants = null;
+
       if (payload.context?.type === "dm") {
         const withUserId = safeText(payload.context.withUserId, 80);
-        const recipient = users.find((user) => user.id === withUserId);
-        if (!recipient || recipient.id === ws.user.id) return;
-        context = { type: "dm", key: dmKey(ws.user.id, recipient.id), participants: [ws.user.id, recipient.id] };
+        if (!areFriends(ws.user.id, withUserId)) return;
+        contextType = "dm";
+        key = dmKey(ws.user.id, withUserId);
+        participants = [ws.user.id, withUserId];
       } else {
-        const roomId = safeText(payload.context?.roomId || "general", 64);
-        if (!roomExists(roomId)) return;
-        context = { type: "room", roomId };
+        groupId = safeText(payload.context?.roomId || "general", 80);
+        if (!isGroupMember(groupId, ws.user.id)) return;
+        contextType = "room";
       }
 
       const text = safeText(payload.text, MAX_TEXT_LENGTH);
@@ -391,28 +556,26 @@ wss.on("connection", (ws, req) => {
       if (!text && !voice) return;
       if (voice && !voice.dataUrl.startsWith("data:audio/")) return;
 
-      const message = {
-        id: crypto.randomUUID(),
-        senderId: ws.user.id,
-        senderName: ws.user.displayName,
-        context,
-        text,
-        voice,
-        at: new Date().toISOString()
-      };
-
-      messages.push(message);
+      const id = crypto.randomUUID();
+      const createdAt = now();
+      db.prepare(`
+        INSERT INTO messages (id, sender_id, sender_name, context_type, group_id, dm_key, participants_json, text, voice_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, ws.user.id, ws.user.displayName, contextType, groupId, key, participants ? JSON.stringify(participants) : null, text, voice ? JSON.stringify(voice) : null, createdAt);
       pruneData();
-      broadcastMessage(message);
+      const row = db.prepare("SELECT * FROM messages WHERE id = ?").get(id);
+      broadcastMessage(rowMessage(row));
     }
   });
 
   ws.on("close", broadcastPresence);
 });
 
+ensureDefaultGroup();
 pruneData();
 setInterval(pruneData, 60 * 60 * 1000);
 
 server.listen(PORT, HOST, () => {
   console.log(`Chat server listening on http://${HOST}:${PORT}`);
+  console.log(`SQLite database: ${DB_FILE}`);
 });

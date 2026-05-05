@@ -24,6 +24,10 @@ const recordButton = document.querySelector("#recordButton");
 const logoutButton = document.querySelector("#logoutButton");
 const menuButton = document.querySelector("#menuButton");
 const sidebar = document.querySelector("#sidebar");
+const friendForm = document.querySelector("#friendForm");
+const friendInput = document.querySelector("#friendInput");
+const inviteForm = document.querySelector("#inviteForm");
+const inviteInput = document.querySelector("#inviteInput");
 
 let token = localStorage.getItem(tokenKey) || "";
 let socket;
@@ -154,6 +158,13 @@ function renderRooms() {
 
 function renderUsers() {
   userListEl.textContent = "";
+  if (!users.length) {
+    const empty = document.createElement("div");
+    empty.className = "side-empty";
+    empty.textContent = "No friends yet.";
+    userListEl.appendChild(empty);
+    return;
+  }
   users
     .filter((user) => user.id !== currentUser.id)
     .forEach((user) => {
@@ -165,6 +176,14 @@ function renderUsers() {
       button.addEventListener("click", () => switchContext({ type: "dm", withUserId: user.id }));
       userListEl.appendChild(button);
     });
+}
+
+function applyBootstrap(payload) {
+  currentUser = payload.user || currentUser;
+  users = payload.users || users;
+  rooms = payload.rooms || rooms;
+  online = payload.online || online;
+  renderShell();
 }
 
 function renderShell() {
@@ -203,12 +222,12 @@ function connect() {
   socket.addEventListener("message", (event) => {
     const payload = JSON.parse(event.data);
     if (payload.type === "ready") {
-      currentUser = payload.user;
-      users = payload.users;
-      rooms = payload.rooms;
-      online = payload.online;
-      renderShell();
+      applyBootstrap(payload);
       replaceMessages(payload.history);
+      return;
+    }
+    if (payload.type === "bootstrap") {
+      applyBootstrap(payload);
       return;
     }
     if (payload.type === "history") {
@@ -287,6 +306,40 @@ async function authenticate(mode) {
   }
 }
 
+async function addFriend() {
+  const username = friendInput.value.trim();
+  if (!username) return;
+  statusEl.textContent = "Adding friend...";
+  try {
+    const payload = await api("/api/friends/add", {
+      method: "POST",
+      body: JSON.stringify({ username })
+    });
+    applyBootstrap(payload);
+    friendInput.value = "";
+    statusEl.textContent = "Friend added";
+  } catch (error) {
+    statusEl.textContent = error.message;
+  }
+}
+
+async function inviteToGroup() {
+  const username = inviteInput.value.trim();
+  if (!username || currentContext.type !== "room") return;
+  statusEl.textContent = "Inviting...";
+  try {
+    const payload = await api("/api/groups/invite", {
+      method: "POST",
+      body: JSON.stringify({ username, groupId: currentContext.roomId })
+    });
+    applyBootstrap(payload);
+    inviteInput.value = "";
+    statusEl.textContent = "Friend invited";
+  } catch (error) {
+    statusEl.textContent = error.message;
+  }
+}
+
 async function logout() {
   try {
     if (token) await api("/api/logout", { method: "POST", body: "{}" });
@@ -351,6 +404,14 @@ newRoomButton.addEventListener("click", () => roomDialog.showModal());
 cancelRoomButton.addEventListener("click", () => roomDialog.close());
 logoutButton.addEventListener("click", logout);
 menuButton.addEventListener("click", () => sidebar.classList.toggle("open"));
+friendForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  addFriend();
+});
+inviteForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  inviteToGroup();
+});
 
 composer.addEventListener("submit", (event) => {
   event.preventDefault();

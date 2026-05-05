@@ -20,6 +20,10 @@
             <span>Groups</span>
             <button type="button" class="icon-button" id="newRoomButton" title="New group">+</button>
           </div>
+          <form class="inline-form" id="inviteForm">
+            <input id="inviteInput" type="text" maxlength="32" placeholder="Invite friend" />
+            <button type="submit">Invite</button>
+          </form>
           <div class="nav-list" id="roomList"></div>
         </section>
 
@@ -28,6 +32,10 @@
             <span>People</span>
             <span class="online-pill"><span class="dot"></span><span id="onlineCount">0</span></span>
           </div>
+          <form class="inline-form" id="friendForm">
+            <input id="friendInput" type="text" maxlength="32" placeholder="Add username" />
+            <button type="submit">Add</button>
+          </form>
           <div class="nav-list" id="userList"></div>
         </section>
       </aside>

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The app is a single Node.js service that serves both the browser client and the real-time chat backend.
+The app is a single Node.js service that serves both the browser client and the real-time chat backend. Runtime data is stored in SQLite.
 
 ```text
 Browser client
@@ -13,16 +13,16 @@ Browser client
 Node.js server
   |
   v
-Local JSON files under data/
+SQLite database under data/
 ```
 
 ## Runtime Components
 
-- `server.js`: HTTP server, auth API, WebSocket server, persistence, message retention.
+- `server.js`: HTTP server, auth API, WebSocket server, SQLite persistence, message retention.
 - `public/index.html`: browser UI structure.
-- `public/app.js`: client state, auth flow, room switching, private chat, voice recording, WebSocket handling.
+- `public/app.js`: client state, auth flow, group switching, friend private chat, group invites, voice recording, WebSocket handling.
 - `public/styles.css`: responsive desktop and mobile layout.
-- `data/`: local runtime data, ignored by Git.
+- `data/chat.sqlite`: local runtime database, ignored by Git.
 
 ## HTTP Endpoints
 
@@ -32,6 +32,8 @@ Local JSON files under data/
 - `POST /api/login`: validates credentials and creates a session.
 - `POST /api/logout`: revokes the current session token.
 - `GET /api/session`: validates a session token and returns app bootstrap data.
+- `POST /api/friends/add`: creates a mutual friend relationship by username.
+- `POST /api/groups/invite`: adds a friend to a group where the current user is a member.
 
 ## WebSocket
 
@@ -55,21 +57,30 @@ Main server-to-client events:
 - `history`: requested message history.
 - `message`: new visible message.
 - `presence`: online user IDs.
-- `rooms`: updated room list.
+- `bootstrap`: refreshed user, friend, group, and presence state.
 
-## Data Files
+## Database
 
-The server writes local JSON files:
+The server writes to `data/chat.sqlite`. Core tables:
 
-- `data/users.json`: user records with salted password hashes.
-- `data/sessions.json`: active login sessions.
-- `data/rooms.json`: group chat metadata.
-- `data/messages.json`: retained messages.
+- `users`: user records with salted password hashes.
+- `sessions`: active login sessions.
+- `friendships`: mutual friend relationships.
+- `groups`: group metadata.
+- `group_members`: group membership and role.
+- `messages`: retained group and private messages.
 
-Message records include a `context`:
+Message records include a context:
 
-- Group: `{ "type": "room", "roomId": "general" }`
-- Private chat: `{ "type": "dm", "key": "...", "participants": ["...", "..."] }`
+- Group: `context_type = 'room'` with `group_id`.
+- Private chat: `context_type = 'dm'` with `dm_key` and participants.
+
+## Visibility Rules
+
+- Users can see only groups where they are members.
+- Private messages require an existing friendship.
+- Group invites require the target user to be a friend.
+- The default `General` group is added to each user at registration or login.
 
 ## Retention
 
