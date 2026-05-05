@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chat</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="chat">
+        <header class="topbar">
+          <div>
+            <h1>Chat</h1>
+            <p id="status">Connecting...</p>
+          </div>
+          <div class="online" aria-label="Online users">
+            <span class="dot"></span>
+            <span id="onlineCount">0</span>
+          </div>
+        </header>
+
+        <div id="messages" class="messages" aria-live="polite"></div>
+
+        <form id="composer" class="composer">
+          <input id="messageInput" type="text" autocomplete="off" placeholder="Message" maxlength="1000" />
+          <button type="submit">Send</button>
+        </form>
+      </section>
+    </main>
+
+    <dialog id="nameDialog">
+      <form method="dialog" id="nameForm" class="name-form">
+        <h2>Enter a display name</h2>
+        <input id="nameInput" type="text" autocomplete="name" maxlength="32" placeholder="Your name" autofocus />
+        <button type="submit">Join</button>
+      </form>
+    </dialog>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

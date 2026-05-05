@@ -2,3 +2,5 @@
 *.log
 .env
 .env.*
+node_modules/
+data/
