@@ -2,6 +2,10 @@
 
 A cross-platform real-time chat app served from the current host.
 
+## Status
+
+This project is a self-hosted web chat application. The backend runs on the current server and the client runs in a browser, so it works across desktop and mobile platforms without installing native apps.
+
 ## Features
 
 - Browser client for desktop and mobile
@@ -12,6 +16,12 @@ A cross-platform real-time chat app served from the current host.
 - Online user presence
 - Seven-day message retention
 - Local JSON persistence in `data/`
+
+## Documentation
+
+- [User Guide](docs/USER_GUIDE.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Improvement Roadmap](docs/ROADMAP.md)
 
 ## Run
 
@@ -52,3 +62,9 @@ The server stores local data under `data/`:
 - `messages.json`
 
 Messages older than seven days are removed automatically.
+
+## Current Limitations
+
+- Voice recording may require HTTPS on mobile browsers.
+- JSON files are suitable for a small private deployment, not heavy production traffic.
+- There is no admin UI yet for user, room, or moderation management.
